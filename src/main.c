@@ -323,6 +323,92 @@ int map_button(int new_key_code, button_mapping* mapping_array, int size, int ma
     return previous_mapping_index;
 }
 
+
+int load_config(char *filename, gamepad_button *keymap, button_mapping *mapping_array, int mapping_array_size) {
+    FILE* file = fopen(filename, "r");
+    if (file == NULL) {
+        fprintf(stderr, "ERROR: could not open config file %s: %s\n", filename, strerror(errno));
+        return -1;
+    } 
+
+    memset(keymap, 0, sizeof(gamepad_button) * KEYMAP_SIZE);
+
+    char c;
+    char buffer[BUFSIZE];
+    char setting[BUFSIZE];
+    char value[BUFSIZE];
+    int cursor = 0;
+    while ((c = getc(file)) != EOF) {
+        if (c == ' ') {  // parse setting
+            buffer[cursor] = '\0';
+            strncpy(setting, buffer, BUFSIZE);
+            file_skip_character(file, ' ');
+            cursor = 0;
+            continue;
+        }
+        if (c == '\n') {  // parse value
+            buffer[cursor] = '\0';
+            strncpy(value, buffer, BUFSIZE);
+            cursor = 0;  // TODO: is it really fine to do this here?
+
+            // TODO: test error checking
+            {  // keymap_add_setting()  
+                
+                int button_mapping_setting_index = -1;
+                {  // find_button_mapping_for_setting()
+                    for (int i = 0; i < mapping_array_size; i++) {
+                        int compare = strcmp(setting, mapping_array[i].setting_button_name) == 0;
+                        if (compare) {
+                            button_mapping_setting_index = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (button_mapping_setting_index == -1) {
+                    fprintf(stderr, "ERROR: invalid button name in config file setting: %s %s\n", setting, value);
+                    continue;
+                }
+
+                int key = atoi(value);
+                if (key == 0) {
+                    fprintf(stderr, "ERROR: keycode in config file doesn't seem to be number: %s %s\n", setting, value);
+                    continue;
+                }
+
+                if (key >= KEYMAP_SIZE) {
+                    fprintf(stderr, "ERROR: keycode in config file exceeds max value %d: %s %s\n", KEYMAP_SIZE, setting, value);
+                    continue;
+                }
+
+                if (keyboard_key_names[key] == NULL) {
+                    fprintf(stderr, "ERROR: this keycode isn't allowed because of non-existant reasons: %s %s\n"
+                                    "       if you really want to use it, change keyboard_key_names[%s] to name "
+                                    "of your button in the source code", setting, value, value);
+                    continue;
+                }
+
+                map_button(key, mapping_array, mapping_array_size, button_mapping_setting_index, keymap);
+            }
+
+            continue;
+        }
+
+        buffer[cursor++] = c;
+        if (cursor >= BUFSIZE) {
+            printf("not long enough, buffer: %s\n", buffer);
+            cursor = 0;
+            assert(cursor >= BUFSIZE);
+        }
+    }
+
+    if (fclose(file) == -1) {
+        fprintf(stderr, "ERROR: Could not close file %s: %s\n", filename, strerror(errno));
+    }
+
+    return 0;
+}
+
 int save_config(char *filename, button_mapping *mapping_array, int size) {
     FILE* file = fopen(filename, "w");
     if (file == NULL) {
@@ -489,87 +575,8 @@ int main() {
         strncpy(mapping_array[i].display_name, mapping_array[i].button_name, BUFSIZE);
     }
 
-    { // load_config()
-        char *filename = "mapping.conf";
-        FILE* file = fopen(filename, "r");
-        if (file == NULL) {
-            fprintf(stderr, "INFO: could not open config file %s: %s\n", filename, strerror(errno));
-        } else {
-            memset(keymap, 0, sizeof(gamepad_button) * KEYMAP_SIZE);
-
-            char c;
-            char buffer[BUFSIZE];
-            char setting[BUFSIZE];
-            char value[BUFSIZE];
-            int cursor = 0;
-            while ((c = getc(file)) != EOF) {
-                if (c == ' ') {  // parse setting
-                    buffer[cursor] = '\0';
-                    strncpy(setting, buffer, BUFSIZE);
-                    file_skip_character(file, ' ');
-                    cursor = 0;
-                    continue;
-                }
-                if (c == '\n') {  // parse value
-                    buffer[cursor] = '\0';
-                    strncpy(value, buffer, BUFSIZE);
-                    cursor = 0;  // TODO: is it really fine to do this here?
-
-                    // TODO: test error checking
-                    {  // keymap_add_setting()  
-                        
-                        int button_mapping_setting_index = -1;
-                        {  // find_button_mapping_for_setting()
-                            for (int i = 0; i < mapping_array_size; i++) {
-                                int compare = strcmp(setting, mapping_array[i].setting_button_name) == 0;
-                                if (compare) {
-                                    button_mapping_setting_index = i;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (button_mapping_setting_index == -1) {
-                            fprintf(stderr, "ERROR: invalid button name in config file setting: %s %s\n", setting, value);
-                            continue;
-                        }
-
-                        int key = atoi(value);
-                        if (key == 0) {
-                            fprintf(stderr, "ERROR: keycode in config file doesn't seem to be number: %s %s\n", setting, value);
-                            continue;
-                        }
-
-                        if (key >= KEYMAP_SIZE) {
-                            fprintf(stderr, "ERROR: keycode in config file exceeds max value %d: %s %s\n", KEYMAP_SIZE, setting, value);
-                            continue;
-                        }
-
-                        if (keyboard_key_names[key] == NULL) {
-                            fprintf(stderr, "ERROR: this keycode isn't allowed because of non-existant reasons: %s %s\n"
-                                            "       if you really want to use it, change keyboard_key_names[%s] to name "
-                                            "of your button in the source code", setting, value, value);
-                            continue;
-                        }
-
-                        map_button(key, mapping_array, mapping_array_size, button_mapping_setting_index, keymap);
-                    }
-
-                    continue;
-                }
-                buffer[cursor++] = c;
-                if (cursor >= BUFSIZE) {
-                    printf("not long enough, buffer: %s\n", buffer);
-                    cursor = 0;
-                    assert(cursor >= BUFSIZE);
-                }
-            }
-
-            if (fclose(file) == -1) {
-                fprintf(stderr, "ERROR: Could not close file %s: %s\n", filename, strerror(errno));
-            }
-        }
-    }
+    load_config("mapping.conf", keymap, mapping_array, mapping_array_size);
+    
 
     // NOTE: button mapping happens all over the place with these 2 variables
     int gui_config_mapping_opened = 0;
