@@ -27,7 +27,9 @@
 #include "../libs/nuklear.h"
 #include "../libs/nuklear_sdl_renderer.h"
 #include "sdl_image_as.h"
-#include "gamepad-image.h"
+
+#define IMAGE_WIDTH  512
+#define IMAGE_HEIGHT 316
 
 #define SIDEBAR 200
 #define CONFIG_WINDOW_WIDTH  800
@@ -429,8 +431,29 @@ int save_config(char *filename, button_mapping *mapping_array, int size) {
     return 1;
 }
 
+int find_last_index_with_char(char *string, int length, char c) {
+   int last_index = -1;
+   for (int i = 0; string[i] && i < length; i++) {
+      if (string[i] == c) {
+         last_index = i;
+      }
+   }
+   return last_index;
+}
+
+// TODO: how reliable is that?
+void enter_executable_path() {
+   char path[4096];
+   ssize_t length = readlink("/proc/self/exe", path, 4096);
+   path[length] = '\0';
+   int last_slash = find_last_index_with_char(path, 4096, '/');
+   path[last_slash+1] = '\0';
+   chdir(path);
+}
 
 int main() {
+    enter_executable_path();
+
     struct input_event events[64];
 
     SDL_Window *config_window;
@@ -438,9 +461,6 @@ int main() {
 
     struct nk_context *ctx;
     int input_is_our_event;
-
-    SDL_Texture *gamepad_image;
-    SDL_Rect gamepad_image_rect = {IMAGE_X, IMAGE_Y, IMAGE_WIDTH, IMAGE_HEIGHT};
 
     int gui_config_window_opened = 1;
     Device devices[DEVICES_CAPACITY];
@@ -510,8 +530,6 @@ int main() {
             return 1;
         }
 
-        gamepad_image = image_as_texture(config_renderer, gamepad);
-
         float font_scale = 1;
         ctx = nk_sdl_init(config_window, config_renderer);
         {
@@ -531,42 +549,45 @@ int main() {
         gui_config_window_opened = 1;
     }
 
+    SDL_Rect gamepad_image_rect = {IMAGE_X, IMAGE_Y, IMAGE_WIDTH, IMAGE_HEIGHT};
+    SDL_Texture *gamepad_image = file_as_texture(config_renderer, "pngs/gamepad.png");
+
     // very important TODO: don't load textures like that anymore, that's way too much waiting for a compiler..
     button_mapping mapping_array[] = {
         { "LStick Active",  "left_stick_active",  { LEFT_ANALOG_MOVEMENT,  BUTTON_ANALOG_MOVEMENT, 1 }, NULL, "", -1 },
         { "RStick Active", "right_stick_active", { RIGHT_ANALOG_MOVEMENT, BUTTON_ANALOG_MOVEMENT, 1 }, NULL, "", -1 },
 
-        { "A button", "a_button", { BTN_SOUTH, BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, s),   "", -1 },
-        { "B button", "b_button", { BTN_EAST,  BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, e),   "", -1 },
-        { "Y button", "y_button", { BTN_NORTH, BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, n),   "", -1 },
-        { "X button", "x_button", { BTN_WEST,  BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, w),   "", -1 },
+        { "A button", "a_button", { BTN_SOUTH, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/s.png"),  "", -1 },
+        { "B button", "b_button", { BTN_EAST,  BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/e.png"),  "", -1 },
+        { "Y button", "y_button", { BTN_NORTH, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/w.png"),  "", -1 },
+        { "X button", "x_button", { BTN_WEST,  BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/n.png"),  "", -1 },
      
-        { "Dpad Down",  "dpad_down",  { ABS_HAT0X, BUTTON_AXIS, -1 }, image_as_texture(config_renderer, dpad_down),   "", -1 },
-        { "Dpad Left",  "dpad_left",  { ABS_HAT0Y, BUTTON_AXIS, -1 }, image_as_texture(config_renderer, dpad_left),   "", -1 },
-        { "Dpad Right", "dpad_right", { ABS_HAT0X, BUTTON_AXIS,  1 }, image_as_texture(config_renderer, dpad_right),  "", -1 },
-        { "Dpad Up",    "dpad_up",    { ABS_HAT0Y, BUTTON_AXIS,  1 }, image_as_texture(config_renderer, dpad_up),     "", -1 },
+        { "Dpad Down",  "dpad_down",  { ABS_HAT0X, BUTTON_AXIS, -1 }, file_as_texture(config_renderer, "pngs/dpad-down.png"),   "", -1 },
+        { "Dpad Left",  "dpad_left",  { ABS_HAT0Y, BUTTON_AXIS, -1 }, file_as_texture(config_renderer, "pngs/dpad-left.png"),   "", -1 },
+        { "Dpad Right", "dpad_right", { ABS_HAT0X, BUTTON_AXIS,  1 }, file_as_texture(config_renderer, "pngs/dpad-right.png"),  "", -1 },
+        { "Dpad Up",    "dpad_up",    { ABS_HAT0Y, BUTTON_AXIS,  1 }, file_as_texture(config_renderer, "pngs/dpad-up.png"),     "", -1 },
      
-        { "Left Shoulder",  "left_shoulder",  { BTN_TL, BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, lshoulder),   "", -1 },
-        { "Right Shoulder", "right_Shoulder", { BTN_TR, BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, rshoulder),   "", -1 },
+        { "Left Shoulder",  "left_shoulder",  { BTN_TL, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/lshoulder.png"),  "", -1 },
+        { "Right Shoulder", "right_Shoulder", { BTN_TR, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/rshoulder.png"),  "", -1 },
      
-        { "Left Stick Press",  "left_stick_press",  { BTN_THUMBL, BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, lstick),   "", -1 },
-        { "Right Stick Press", "right_stick_press", { BTN_THUMBR, BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, rstick),   "", -1 },
+        { "Left Stick Press",  "left_stick_press",  { BTN_THUMBL, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/lstick.png"),  "", -1 },
+        { "Right Stick Press", "right_stick_press", { BTN_THUMBR, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/rstick.png"),  "", -1 },
 
-        { "Left Trigger",  "left_trigger",  { ABS_Z,  BUTTON_AXIS, 1024 }, image_as_texture(config_renderer, ltrigger),   "", -1 },
-        { "Right Trigger", "right_trigger", { ABS_RZ, BUTTON_AXIS, 1024 }, image_as_texture(config_renderer, rtrigger),   "", -1 },
+        { "Left Trigger",  "left_trigger",  { ABS_Z,  BUTTON_AXIS, 1024 }, file_as_texture(config_renderer, "pngs/ltrigger.png"),  "", -1 },
+        { "Right Trigger", "right_trigger", { ABS_RZ, BUTTON_AXIS, 1024 }, file_as_texture(config_renderer, "pngs/rtrigger.png"),  "", -1 },
      
-        { "Left Stick Left",  "left_stick_left",   { ABS_X,  BUTTON_AXIS, -32767 }, image_as_texture(config_renderer, lstick_left),   "", -1 },
-        { "Left Stick Down",  "left_stick_down",   { ABS_Y,  BUTTON_AXIS, -32767 }, image_as_texture(config_renderer, lstick_down),   "", -1 },
-        { "Left Stick Up",    "left_stick_up",     { ABS_Y,  BUTTON_AXIS,  32768 }, image_as_texture(config_renderer, lstick_up),     "", -1 },
-        { "Left Stick Right", "left_stick_right",  { ABS_X,  BUTTON_AXIS,  32768 }, image_as_texture(config_renderer, lstick_right),  "", -1 },
+        { "Left Stick Down",  "left_stick_down",   { ABS_Y,  BUTTON_AXIS, -32767 }, file_as_texture(config_renderer, "pngs/lstick-down.png"),   "", -1 },
+        { "Left Stick Left",  "left_stick_left",   { ABS_X,  BUTTON_AXIS, -32767 }, file_as_texture(config_renderer, "pngs/lstick-left.png"),   "", -1 },
+        { "Left Stick Right", "left_stick_right",  { ABS_X,  BUTTON_AXIS,  32768 }, file_as_texture(config_renderer, "pngs/lstick-right.png"),  "", -1 },
+        { "Left Stick Up",    "left_stick_up",     { ABS_Y,  BUTTON_AXIS,  32768 }, file_as_texture(config_renderer, "pngs/lstick-up.png"),     "", -1 },
      
-        { "Right Stick Left",  "right_stick_left",  { ABS_RX, BUTTON_AXIS, -32767 }, image_as_texture(config_renderer, rstick_left),   "", -1 },
-        { "Right Stick Down",  "right_stick_down",  { ABS_RY, BUTTON_AXIS, -32767 }, image_as_texture(config_renderer, rstick_down),   "", -1 },
-        { "Right Stick Up",    "right_stick_up",    { ABS_RY, BUTTON_AXIS,  32768 }, image_as_texture(config_renderer, rstick_up),     "", -1 },
-        { "Right Stick Right", "right_stick_right", { ABS_RX, BUTTON_AXIS,  32768 }, image_as_texture(config_renderer, rstick_right),  "", -1 },
+        { "Right Stick Down",  "right_stick_down",  { ABS_RY, BUTTON_AXIS, -32767 }, file_as_texture(config_renderer, "pngs/rstick-down.png"),  "", -1 },
+        { "Right Stick Left",  "right_stick_left",  { ABS_RX, BUTTON_AXIS, -32767 }, file_as_texture(config_renderer, "pngs/rstick-left.png"),  "", -1 },
+        { "Right Stick Right", "right_stick_right", { ABS_RX, BUTTON_AXIS,  32768 }, file_as_texture(config_renderer, "pngs/rstick-right.png"), "", -1 },
+        { "Right Stick Up",    "right_stick_up",    { ABS_RY, BUTTON_AXIS,  32768 }, file_as_texture(config_renderer, "pngs/rstick-up.png"),    "", -1 },
      
-        { "Select", "select", { BTN_SELECT, BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, select_btn),   "", -1 },
-        { "Start",  "start",  { BTN_START,  BUTTON_BUTTON, 1 }, image_as_texture(config_renderer, start),        "", -1 },
+        { "Select", "select", { BTN_SELECT, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/select_btn.png"),  "", -1 },
+        { "Start",  "start",  { BTN_START,  BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/start.png"),       "", -1 },
     };
 
     int mapping_array_size = sizeof(mapping_array) / sizeof(mapping_array[0]);
