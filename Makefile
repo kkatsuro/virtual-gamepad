@@ -5,5 +5,5 @@ LIBS=`pkg-config --libs $(PKGS)` -lm
 SRCS=src/main.c src/gamepad_uinput.c
 
 all: canal
-canal: $(SRCS)
+canal: $(SRCS) libs/nuklear.h
 	$(CC) $(CFLAGS) -o canal $(SRCS) $(LIBS)

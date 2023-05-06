@@ -62,18 +62,20 @@ add fake rumble support
             }
 #endif
 
-# design
-Now as I think of it, im pretty sure I always want to start 'config' window, so that should actually be main window.
-running 'canal' itself as a different process is really 
-
 # todo
-## mapper
 * analog gui:
   * resize window
   * change + to something else
   * leave half transparent trail after movement
-  * allow for mapping button to return to zero position or modifier under which you can move at all
-  * allow running for 2 different analogs
 
-* config gui:
-  * 
+* error on exit:
+src/../libs/nuklear.h:20197: nk_begin_titled: Assertion `ctx->style.font && ctx->style.font->width && "if this triggers you forgot to add a font"' failed.
+  
+
+* decide what to do with stick_draw_info/flags for config and saving
+* (!on_button && is_active) doesnt work after loading config
+* fix the bug with locked button when mapping key for the second time
+* allow for closing analog window without exiting completely
+* add some apparently needed communicate about disconnecting(?) because rpcs is freaking out when i just exit
+
+* config profiles + save on button

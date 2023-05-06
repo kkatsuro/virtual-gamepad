@@ -198,8 +198,9 @@ int map_button(int new_key_code, button_mapping* mapping_array, int size, int ma
 
     int previous_mapping_index = -1;
     { // clear both gamepad button and key mappings
-        if (mapping->key != -1)
+        if (mapping->key != -1) {
             keymap[mapping->key].type = BUTTON_UNMAPPED;
+        }
 
         for (int i = 0; i < size; i++) {
             if (new_key_code == mapping_array[i].key) {  // TODO: say that key was already mapped to something
@@ -229,13 +230,20 @@ void file_skip_character(FILE* file, char skipped) {
     ungetc(c, file);
 }
 
+// config flags
+enum {
+    LEFT_STICK_WINDOW  = 1,
+    RIGHT_STICK_WINDOW = 2,
+    LEFT_STICK_ON_BUTTON = 4,
+    RIGHT_STICK_ON_BUTTON = 8,
+};
 
-int load_config(char *filename, gamepad_button *keymap, button_mapping *mapping_array, int mapping_array_size) {
+int load_config(char *filename, gamepad_button *keymap, button_mapping *mapping_array, int mapping_array_size, uint *config_flags) {
     FILE* file = fopen(filename, "r");
     if (file == NULL) {
         fprintf(stderr, "ERROR: could not open config file %s: %s\n", filename, strerror(errno));
         return -1;
-    } 
+    }
 
     memset(keymap, 0, sizeof(gamepad_button) * KEYMAP_SIZE);
 
@@ -257,6 +265,34 @@ int load_config(char *filename, gamepad_button *keymap, button_mapping *mapping_
             strncpy(value, buffer, BUFSIZE);
             cursor = 0;  // TODO: is it really fine to do this here?
 
+            int key = atoi(value);
+
+            { // set_config_flags()
+                if (strcmp(setting, "left_stick_window") == 0) {
+                    if (key)
+                        *config_flags |= LEFT_STICK_WINDOW;
+                    continue;
+                }
+
+                if (strcmp(setting, "right_stick_window") == 0) {
+                    if (key)
+                        *config_flags |= RIGHT_STICK_WINDOW;
+                    continue;
+                }
+
+                if (strcmp(setting, "left_stick_on_button") == 0) {
+                    if (key)
+                        *config_flags |= LEFT_STICK_ON_BUTTON;
+                    continue;
+                }
+
+                if (strcmp(setting, "right_stick_on_button") == 0) {
+                    if (key)
+                        *config_flags |= RIGHT_STICK_ON_BUTTON;
+                    continue;
+                }
+            }
+
             // TODO: test error checking
             {  // keymap_add_setting()  
                 
@@ -276,7 +312,6 @@ int load_config(char *filename, gamepad_button *keymap, button_mapping *mapping_
                     continue;
                 }
 
-                int key = atoi(value);
                 if (key == 0) {
                     fprintf(stderr, "ERROR: keycode in config file doesn't seem to be number: %s %s\n", setting, value);
                     continue;
@@ -315,12 +350,18 @@ int load_config(char *filename, gamepad_button *keymap, button_mapping *mapping_
     return 0;
 }
 
-int save_config(char *filename, button_mapping *mapping_array, int size) {
+int save_config(char *filename, button_mapping *mapping_array, int size, uint config_flags) {
     FILE* file = fopen(filename, "w");
     if (file == NULL) {
         fprintf(stderr, "ERROR: Could not open file %s: %s\n", filename, strerror(errno));
         return 0;
     }
+
+    fprintf(file, "%s %d\n",  "left_stick_window", (config_flags &  LEFT_STICK_WINDOW ? 1 : 0));
+    fprintf(file, "%s %d\n", "right_stick_window", (config_flags & RIGHT_STICK_WINDOW ? 1 : 0));
+
+    fprintf(file, "%s %d\n",  "left_stick_on_button", (config_flags &  LEFT_STICK_ON_BUTTON ? 1 : 0));
+    fprintf(file, "%s %d\n", "right_stick_on_button", (config_flags & RIGHT_STICK_ON_BUTTON ? 1 : 0));
 
     for (int i = 0; i < size; i++) {
         button_mapping mapping = mapping_array[i];
@@ -333,6 +374,19 @@ int save_config(char *filename, button_mapping *mapping_array, int size) {
     }
 
     return 1;
+}
+
+int stick_mouse_coord_change(int coord, int delta, int limit) {
+    coord += delta;
+
+    if (coord < 0) {
+        coord = 0;
+    }
+    else if (coord > limit-1) {
+        coord = limit-1;
+    }
+
+    return coord;
 }
 
 int find_last_index_with_char(char *string, int length, char c) {
@@ -366,7 +420,6 @@ int main() {
     struct nk_context *ctx;
     int input_is_our_event;
 
-    int gui_config_window_opened = 1;
     Device devices[DEVICES_CAPACITY];
     gamepad_button keymap[KEYMAP_SIZE];
 
@@ -412,9 +465,9 @@ int main() {
     }
     
     int config_window_id = -1;
-    if (gui_config_window_opened) {  // create_config_renderer();
+    {  // create_config_renderer();
 
-        config_window = SDL_CreateWindow("nukl-test.c",
+        config_window = SDL_CreateWindow("Virtual Gamepad",
                                           SDL_WINDOWPOS_CENTERED,
                                           SDL_WINDOWPOS_CENTERED,
                                           CONFIG_WINDOW_WIDTH, CONFIG_WINDOW_HEIGHT,
@@ -442,21 +495,19 @@ int main() {
         }
         config_window_id = SDL_GetWindowID(config_window);
 
-        gui_config_window_opened = 1;
     }
 
     SDL_Rect gamepad_image_rect = {IMAGE_X, IMAGE_Y, IMAGE_WIDTH, IMAGE_HEIGHT};
     SDL_Texture *gamepad_image = file_as_texture(config_renderer, "pngs/gamepad.png");
 
-    // very important TODO: don't load textures like that anymore, that's way too much waiting for a compiler..
     button_mapping mapping_array[] = {
         { "LStick Active",  "left_stick_active",  { LEFT_ANALOG_MOVEMENT,  BUTTON_ANALOG_MOVEMENT, 1 }, NULL, "", -1 },
         { "RStick Active", "right_stick_active", { RIGHT_ANALOG_MOVEMENT, BUTTON_ANALOG_MOVEMENT, 1 }, NULL, "", -1 },
 
         { "A button", "a_button", { BTN_SOUTH, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/s.png"),  "", -1 },
         { "B button", "b_button", { BTN_EAST,  BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/e.png"),  "", -1 },
-        { "Y button", "y_button", { BTN_NORTH, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/w.png"),  "", -1 },
-        { "X button", "x_button", { BTN_WEST,  BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/n.png"),  "", -1 },
+        { "Y button", "y_button", { BTN_WEST,  BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/n.png"),  "", -1 },  // THESE TWO HAVE TO BE SWAPPED
+        { "X button", "x_button", { BTN_NORTH, BUTTON_BUTTON, 1 }, file_as_texture(config_renderer, "pngs/w.png"),  "", -1 },  // BECAUSE MICROSOFT XBOX
      
         { "Dpad Down",  "dpad_down",  { ABS_HAT0X, BUTTON_AXIS, -1 }, file_as_texture(config_renderer, "pngs/dpad-down.png"),   "", -1 },
         { "Dpad Left",  "dpad_left",  { ABS_HAT0Y, BUTTON_AXIS, -1 }, file_as_texture(config_renderer, "pngs/dpad-left.png"),   "", -1 },
@@ -492,80 +543,89 @@ int main() {
         strncpy(mapping_array[i].display_name, mapping_array[i].button_name, BUFSIZE);
     }
 
-    load_config("mapping.conf", keymap, mapping_array, mapping_array_size);
-    
+    uint config_flags = 0;
+    load_config("mapping.conf", keymap, mapping_array, mapping_array_size, &config_flags);
 
     // NOTE: button mapping happens all over the place with these 2 variables
-    int gui_config_mapping_opened = 0;
+    int remapping_window_opened = 0;
     int mapped_index;
 
-    # define CHECKBOX_FALSE 1
-    # define CHECKBOX_TRUE 0
-    int draw_left_analog = CHECKBOX_FALSE;
-    int draw_right_analog = CHECKBOX_TRUE;
-
-    int left_analog_active = 0;
-    int right_analog_active = 0;
-
-    SDL_Renderer *left_analog_renderer = NULL;
-    SDL_Renderer *right_analog_renderer = NULL;
-
     int running = 1;
-    int x = 250;
-    int y = 250;
-    int prev_x = 250;
-    int prev_y = 250;
 
-    {  // NOTE: continue here
-        typedef struct {
-            int x;
-            int y;
-        } point;
+    typedef struct {
+        int x;
+        int y;
+    } point;
 
-        typedef struct {
-            SDL_Renderer *renderer;
-            int is_active;
-            int is_window_opened;
-            point pos;
-            point prev_pos;
-        } analog_draw_info;
+    typedef struct {
+        SDL_Window* window;
+        SDL_Renderer *renderer;
+        point pos;
+        point prev_pos;
+        int create_window;  // has to be true for visible window
+        int is_active;      // update pos and emits events
+        int active_on_button;      // wait for modifier key to make is_active work
+    } stick_draw_info;
 
-        analog_draw_info lanalog_draw_info = {
-            NULL,
-            0,
-            CHECKBOX_FALSE,
-            { 250, 250 },
-            { 250, 250 },
-        };
+    stick_draw_info create_stick_draw_info() {
+        stick_draw_info stick = {0};
+        stick.create_window    = 0;
+        stick.is_active        = 0;
+        stick.active_on_button = 0;
+        stick.pos       = (point) { 250, 250 };
+        stick.prev_pos  = (point) { 250, 250 };
+        return stick;
     }
 
-    if (draw_left_analog == CHECKBOX_TRUE) {  // create_analog_window()
-        char* title = "analog left stick";
-        // TODO: start it in better location
-        SDL_Window *Window = SDL_CreateWindow(title, 300, 500, 500, 500, SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS);
-        left_analog_renderer = SDL_CreateRenderer(Window, -1, SDL_RENDERER_PRESENTVSYNC);
-        if (!left_analog_renderer) {
-            printf("ERROR: couldn't initalize renderer\n");  // TODO: fprintf to stderr
+    stick_draw_info create_stick_window(char *title) {
+        stick_draw_info stick = create_stick_draw_info();
+        SDL_Window *window = SDL_CreateWindow(title,
+                                              300, 500,
+                                              500, 500,
+                                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS);
+        if (!window) {
+            fprintf(stderr, "ERROR: Could not open initialize window: %s\n", strerror(errno));
             exit(1);
         }
-    }
 
-    if (draw_right_analog == CHECKBOX_TRUE) {  // create_analog_window()
-        char* title = "analog right stick";
-        // TODO: start it in better location
-        SDL_Window *Window = SDL_CreateWindow(title, 300, 500, 500, 500, SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS);
-        right_analog_renderer = SDL_CreateRenderer(Window, -1, SDL_RENDERER_PRESENTVSYNC);
-        if (!right_analog_renderer) {
-            printf("ERROR: couldn't initalize renderer\n");
+        SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
+        if (!renderer) {
+            fprintf(stderr, "ERROR: Could not open initialize renderer: %s\n", strerror(errno));
             exit(1);
         }
+
+        stick.create_window = 1;
+        stick.window   = window;
+        stick.renderer = renderer;
+        return stick;
     }
+
+    stick_draw_info l_stick;
+    stick_draw_info r_stick;
+
+    {
+        if (config_flags & LEFT_STICK_WINDOW) l_stick = create_stick_window("left stick");
+        else l_stick = create_stick_draw_info();
+
+        if (config_flags & RIGHT_STICK_WINDOW) r_stick = create_stick_window("right stick");
+        else r_stick = create_stick_draw_info();
+
+        l_stick.active_on_button = LEFT_STICK_ON_BUTTON;
+        r_stick.active_on_button = RIGHT_STICK_ON_BUTTON;
+    }
+
+    // config loads
+    // we check flags for drawing analog and create renderer
+    // emit if stick is active
+    // draw renderer if its not null
+    // on every config change, we want to check current drawing analog flags, and close or create renderer
+    // updating starts automatically since renderer is not null anymore
 
     while (running) {
 
         {  // config window start input
             input_is_our_event = SDL_GetMouseFocus() == config_window;
-            if (gui_config_window_opened && input_is_our_event)
+            if (input_is_our_event)
                 nk_input_begin(ctx);
         }
 
@@ -587,11 +647,10 @@ int main() {
             }
 
             {  // config_window_handle_sdl_event()
-                if (gui_config_window_opened && input_is_our_event) { 
+                if (input_is_our_event) { 
 
                     if (Event.type == SDL_WINDOWEVENT && Event.window.event == SDL_WINDOWEVENT_CLOSE 
                                                       && Event.window.windowID == config_window_id) {
-                        gui_config_window_opened = 0;
                         SDL_DestroyWindow(config_window);
                         nk_sdl_shutdown();
                         running = 0;
@@ -604,7 +663,7 @@ int main() {
         }
 
         {  // config window end input
-            if (gui_config_window_opened && input_is_our_event)
+            if (input_is_our_event)
                 nk_input_end(ctx);
         }
 
@@ -626,7 +685,7 @@ int main() {
                         int key = ev.code;
                         // printf("%d %d\n", key, KEYMAP_SIZE);  // XXX: this once printed either 0x110274 or 0x110274274. WHY?
 
-                        if (key < KEYMAP_SIZE && keymap[key].type != BUTTON_UNMAPPED) {   // handle_event_uinput()
+                        if (key < KEYMAP_SIZE && keymap[key].type != BUTTON_UNMAPPED && !remapping_window_opened) {   // handle_event_uinput()
                             gamepad_button button = keymap[key];
 
                             if (button.type == BUTTON_BUTTON) {  // TODO: should we leave this emitting 2 for repeat?
@@ -642,48 +701,43 @@ int main() {
                             }
 
                             else if (button.type == BUTTON_ANALOG_MOVEMENT) {
-                                if (button.which == RIGHT_ANALOG_MOVEMENT) {
-                                    right_analog_active = ev.value;
-                                }
-                                else if (button.which == LEFT_ANALOG_MOVEMENT) {
-                                    left_analog_active = ev.value;
-                                }
-                                else {  // TODO: can this even happen?
-                                    assert ( button.type == BUTTON_ANALOG_MOVEMENT &&
-                                           (button.which == RIGHT_ANALOG_MOVEMENT  || button.which == LEFT_ANALOG_MOVEMENT) );
-                                }
-                                
+                                if (button.which == LEFT_ANALOG_MOVEMENT)
+                                    l_stick.is_active = ev.value;
+
+                                else if (button.which == RIGHT_ANALOG_MOVEMENT)
+                                    r_stick.is_active = ev.value;
                             }
 
                         }
 
-                        if (gui_config_mapping_opened) {  // handle_event_mapping
+                        if (remapping_window_opened) {  // handle_event_mapping
                             int key = ev.code;
-                            gui_config_mapping_opened = 0;
+                            remapping_window_opened = 0;
                             if (key < KEYMAP_SIZE && keyboard_key_names[key] != NULL) {
                             
                                 // TODO: inform about previously_mapped
                                 int previously_mapped = map_button(key, mapping_array, mapping_array_size, mapped_index, keymap);
-                                save_config("mapping.conf", mapping_array, mapping_array_size);
+                                save_config("mapping.conf", mapping_array, mapping_array_size, config_flags);
 
                             } else {
                                 if (key != KEY_ESC) {  // TODO: make backspace remove mapping
-                                    gui_config_mapping_opened = 1;  // dont close if mapped button unsupported
+                                    remapping_window_opened = 1;  // dont close if mapped button unsupported
                                 }
                             }
 
                         }
                     }
 
-                    else if (evdevices[dev].type == EVDEV_MOUSE && right_analog_active && ev.type == EV_REL) {
+                    else if (evdevices[dev].type == EVDEV_MOUSE && ev.type == EV_REL) {
 
                         if (ev.code == REL_X) {
-                            x += ev.value;
-                            if (x < 0) x = 0; else if (x > WINDOW_WIDTH-1) x = WINDOW_WIDTH-1;
+                            if (r_stick.is_active) r_stick.pos.x = stick_mouse_coord_change(r_stick.pos.x, ev.value, WINDOW_WIDTH);
+                            if (l_stick.is_active) l_stick.pos.x = stick_mouse_coord_change(l_stick.pos.x, ev.value, WINDOW_WIDTH);
                         }
+
                         if (ev.code == REL_Y) {
-                            y += ev.value;
-                            if (y < 0) y = 0; else if (y > WINDOW_HEIGHT-1) y = WINDOW_HEIGHT-1;
+                            if (r_stick.is_active) r_stick.pos.y = stick_mouse_coord_change(r_stick.pos.y, ev.value, WINDOW_HEIGHT);
+                            if (l_stick.is_active) l_stick.pos.y = stick_mouse_coord_change(l_stick.pos.y, ev.value, WINDOW_HEIGHT);
                         }
 
                     }
@@ -692,57 +746,115 @@ int main() {
             }   
         }
 
-        if (!right_analog_active) {
-            x = 250;
-            y = 250;
+        { // stick_draw_info_emit(int *gamepad_input_happened) 
+            stick_draw_info stick = l_stick;
+
+            if (!stick.is_active) {
+                stick.pos.x = 250;
+                stick.pos.y = 250;
+            }
+
+            if (stick.prev_pos.x != stick.pos.x) {
+                int value = (int) MAP(stick.pos.x-250, 250, 32767);
+                gamepad_emit(gamepad_fd, EV_ABS, ABS_X, value);
+                gamepad_input_happened = 1;
+            }
+
+            if (stick.prev_pos.y != stick.pos.y) {
+                int value = (int) MAP(stick.pos.y-250, 250, 32767);
+                gamepad_emit(gamepad_fd, EV_ABS, ABS_Y, value);
+                gamepad_input_happened = 1;
+            }
+
+            stick.prev_pos.x = stick.pos.x;
+            stick.prev_pos.y = stick.pos.y;
+
+            l_stick = stick;
         }
 
-        if (prev_x != x) {
-            int value = (int) MAP(x-250, 250, 32767);
-            gamepad_emit(gamepad_fd, EV_ABS, ABS_RX, value);
-            gamepad_input_happened = 1;
+
+        { // stick_draw_info_emit(int *gamepad_input_happened) 
+            stick_draw_info stick = r_stick;
+
+            if (!stick.is_active) {
+                stick.pos.x = 250;
+                stick.pos.y = 250;
+            }
+
+            if (stick.prev_pos.x != stick.pos.x) {
+                int value = (int) MAP(stick.pos.x-250, 250, 32767);
+                gamepad_emit(gamepad_fd, EV_ABS, ABS_RX, value);
+                gamepad_input_happened = 1;
+            }
+
+            if (stick.prev_pos.y != stick.pos.y) {
+                int value = (int) MAP(stick.pos.y-250, 250, 32767);
+                gamepad_emit(gamepad_fd, EV_ABS, ABS_RY, value);
+                gamepad_input_happened = 1;
+            }
+
+            stick.prev_pos.x = stick.pos.x;
+            stick.prev_pos.y = stick.pos.y;
+
+            r_stick = stick;
         }
 
-        if (prev_y != y) {
-            int value = (int) MAP(y-250, 250, 32767);
-            gamepad_emit(gamepad_fd, EV_ABS, ABS_RY, value);
-            gamepad_input_happened = 1;
-        }
-
-        prev_x = x;
-        prev_y = y;
 
         if (gamepad_input_happened) {
             gamepad_emit(gamepad_fd, EV_SYN, SYN_REPORT, 0);
         }
 
-        if (draw_right_analog == CHECKBOX_TRUE) {
-            SDL_SetRenderDrawColor(right_analog_renderer, 0x18, 0x18, 0x18, 0xFF);
-            SDL_RenderClear(right_analog_renderer);
-            SDL_SetRenderDrawColor(right_analog_renderer, 0xAA, 0xAA, 0xAA, 0xFF);
+
+        if (r_stick.renderer) {  // stick_draw_info_render
+            stick_draw_info stick = r_stick;
+
+            SDL_SetRenderDrawColor(stick.renderer, 0x18, 0x18, 0x18, 0xFF);
+            SDL_RenderClear(stick.renderer);
+            SDL_SetRenderDrawColor(stick.renderer, 0xAA, 0xAA, 0xAA, 0xFF);
+
+            int x = stick.pos.x;
+            int y = stick.pos.y;
 
             {  // sdl_renderer_draw_cross();
                 int size = 5;
                 for (int draw_x = x - size; draw_x <= x + size; draw_x++)
-                    SDL_RenderDrawPoint(right_analog_renderer, draw_x, y);
+                    SDL_RenderDrawPoint(stick.renderer, draw_x, y);
                 for (int draw_y = y - size; draw_y <= y + size; draw_y++)
-                    SDL_RenderDrawPoint(right_analog_renderer, x, draw_y);
+                    SDL_RenderDrawPoint(stick.renderer, x, draw_y);
             }
 
-            SDL_RenderPresent(right_analog_renderer);
-        } else if (right_analog_renderer != NULL) {
-            // TODO: close it
+            SDL_RenderPresent(stick.renderer);
         }
 
-        {  // render_config_window()
-            if (!gui_config_window_opened)
-                continue;
 
+        if (l_stick.renderer) {  // stick_draw_info_render
+            stick_draw_info stick = l_stick;
+
+            SDL_SetRenderDrawColor(stick.renderer, 0x18, 0x18, 0x18, 0xFF);
+            SDL_RenderClear(stick.renderer);
+            SDL_SetRenderDrawColor(stick.renderer, 0xAA, 0xAA, 0xAA, 0xFF);
+
+            int x = stick.pos.x;
+            int y = stick.pos.y;
+
+            {  // sdl_renderer_draw_cross();
+                int size = 5;
+                for (int draw_x = x - size; draw_x <= x + size; draw_x++)
+                    SDL_RenderDrawPoint(stick.renderer, draw_x, y);
+                for (int draw_y = y - size; draw_y <= y + size; draw_y++)
+                    SDL_RenderDrawPoint(stick.renderer, x, draw_y);
+            }
+
+            SDL_RenderPresent(stick.renderer);
+        }
+
+
+        {  // render_config_window()
             SDL_Texture *hovered_button_texture = NULL;
 
             {  // display_buttons()
-                int main_window_flags =  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_SCROLL_AUTO_HIDE;  //  | NK_WINDOW_MOVABLE
-                if (gui_config_mapping_opened)
+                int main_window_flags =  NK_WINDOW_BORDER | NK_WINDOW_SCROLL_AUTO_HIDE;  //  | NK_WINDOW_MOVABLE NK_WINDOW_TITLE |
+                if (remapping_window_opened)
                     main_window_flags |= NK_WINDOW_NO_INPUT;
 
                 if (nk_begin(ctx, "buttons", nk_rect(10, 10, SIDEBAR, CONFIG_WINDOW_HEIGHT-20), main_window_flags)) {
@@ -750,35 +862,75 @@ int main() {
                     /* nk_layout_row_push 	Pushes another column with given size or window ratio */
                     /* nk_layout_row_end   Finished previously started row */ 
 
-                    nk_layout_row_begin(ctx, NK_STATIC, 30, 2);
+                    nk_layout_row_dynamic(ctx, 20, 1);
+                    nk_label(ctx, "Left Stick Window settings:", NK_TEXT_LEFT);
                     {
-                        nk_layout_row_push(ctx, 20);
-                        nk_checkbox_label(ctx, "", &draw_left_analog);
-                        nk_layout_row_push(ctx, SIDEBAR-20);
-                        if (nk_button_label(ctx, mapping_array[0].display_name)) {
-                            gui_config_mapping_opened = 1;
-                            mapped_index = 0;
+                        int window_visible = config_flags & LEFT_STICK_WINDOW;
+                        if (nk_checkbox_label(ctx, "Enabled", &window_visible)) {
+                            if (l_stick.window == NULL)
+                                l_stick = create_stick_window("left stick");
+                            else {
+                                SDL_DestroyWindow(l_stick.window);
+                                l_stick = create_stick_draw_info();
+                            }
+                            config_flags ^= LEFT_STICK_WINDOW;
+                            save_config("mapping.conf", mapping_array, mapping_array_size, config_flags);
+                        }
+
+
+                        int active_on_button = config_flags & LEFT_STICK_ON_BUTTON;
+                        if (nk_checkbox_label(ctx, "Active on button", &active_on_button)) {
+                            config_flags ^= LEFT_STICK_ON_BUTTON;
+                            l_stick.active_on_button = !l_stick.active_on_button;
+                            l_stick.is_active = (l_stick.active_on_button ? 1 : 0);
+                            save_config("mapping.conf", mapping_array, mapping_array_size, config_flags);
                         }
                     }
-                    nk_layout_row_end(ctx);
 
-                    nk_layout_row_begin(ctx, NK_STATIC, 30, 2);
+                    if (nk_button_label(ctx, mapping_array[0].display_name)) {
+                        remapping_window_opened = 1;
+                        mapped_index = 0;
+                    }
+
+                    nk_label(ctx, "--------------------------------", NK_TEXT_LEFT);  // TODO: replace with some separator
+
+                    nk_label(ctx, "Right Stick Window settings:", NK_TEXT_LEFT);
                     {
-                        nk_layout_row_push(ctx, 20);
-                        nk_checkbox_label(ctx, "", &draw_right_analog);
-                        nk_layout_row_push(ctx, SIDEBAR-20);
-                        if (nk_button_label(ctx, mapping_array[1].display_name)) {
-                            gui_config_mapping_opened = 1;
-                            mapped_index = 1;
+                        int window_visible = config_flags & RIGHT_STICK_WINDOW;
+                        nk_checkbox_label(ctx, "Enabled", &window_visible);
+                        if (window_visible == !(config_flags & RIGHT_STICK_WINDOW)) {
+                            if (r_stick.window == NULL)
+                                r_stick = create_stick_window("right stick");
+                            else {
+                                SDL_DestroyWindow(r_stick.window);
+                                r_stick = create_stick_draw_info();
+                            }
+                            config_flags ^= RIGHT_STICK_WINDOW;
+                            save_config("mapping.conf", mapping_array, mapping_array_size, config_flags);
+                        }
+
+                        int active_on_button = config_flags & RIGHT_STICK_ON_BUTTON;
+                        if (nk_checkbox_label(ctx, "Active on button", &active_on_button)) {
+                            config_flags ^= RIGHT_STICK_ON_BUTTON;
+                            r_stick.active_on_button = !r_stick.active_on_button;
+                            r_stick.is_active = (r_stick.active_on_button ? 1 : 0);
+                            save_config("mapping.conf", mapping_array, mapping_array_size, config_flags);
                         }
                     }
-                    nk_layout_row_end(ctx);
 
-                    nk_layout_row_dynamic(ctx, 30, 1);
+                    if (nk_button_label(ctx, mapping_array[1].display_name)) {
+                        remapping_window_opened = 1;
+                        mapped_index = 1;
+                    }
+
+                    nk_label(ctx, "--------------------------------", NK_TEXT_LEFT);  // TODO: replace with some separator
+
+                    nk_label(ctx, "Button Mappings:", NK_TEXT_LEFT);
+                    nk_layout_row_dynamic(ctx, 28, 1);
                     for (int i = 2; i < mapping_array_size; i++) {
 
                         if (nk_button_label(ctx, mapping_array[i].display_name)) {
-                            gui_config_mapping_opened = 1;
+                            remapping_window_opened = 1;
                             mapped_index = i;
                         }
 
@@ -791,7 +943,7 @@ int main() {
             }
 
             {  // display_mapping_window()
-                if (gui_config_mapping_opened && nk_begin(ctx, "map button", nk_rect(150, 200, 250, 100), NK_WINDOW_BORDER)) {
+                if (remapping_window_opened && nk_begin(ctx, "map button", nk_rect(150, 200, 250, 100), NK_WINDOW_BORDER)) {
                     nk_layout_row_dynamic(ctx, 70, 1);
 
                     char name[BUFSIZE+32];
@@ -815,9 +967,7 @@ int main() {
     }
 
     uinput_close(gamepad_fd);
-
-    if (gui_config_window_opened)
-        nk_sdl_shutdown();
+    nk_sdl_shutdown();
 
     SDL_Quit();
 }
