@@ -10,10 +10,11 @@
 #include <stdlib.h>
 
 #include <linux/input.h>
-#include <linux/uinput.h>
 #include <sys/ioctl.h>
 
 #include <SDL2/SDL.h>
+
+#include "./gamepad_uinput.h"
 
 #define NK_INCLUDE_FIXED_TYPES
 #define NK_INCLUDE_STANDARD_IO
@@ -31,23 +32,20 @@
 #define IMAGE_WIDTH  512
 #define IMAGE_HEIGHT 316
 
-#define SIDEBAR 200
-#define CONFIG_WINDOW_WIDTH  800
-#define CONFIG_WINDOW_HEIGHT 600
+#define SIDEBAR 250
+#define CONFIG_WINDOW_WIDTH  1280
+#define CONFIG_WINDOW_HEIGHT 720
 #define IMAGE_X (CONFIG_WINDOW_WIDTH  - IMAGE_WIDTH + SIDEBAR)  / 2
 #define IMAGE_Y (CONFIG_WINDOW_HEIGHT - IMAGE_HEIGHT) / 2
 
 #define DEV_INPUT_EVENT "/dev/input"
 #define EVENT_DEV_NAME "event"
 
-#define SCREEN_WIDTH 500
-#define SCREEN_HEIGHT 500
+#define WINDOW_WIDTH 500
+#define WINDOW_HEIGHT 500
 
 #define DEVICES_CAPACITY 256
 #define MAP(x, current_range_max, desired_range_max) (((double) x) / ((double) current_range_max / desired_range_max))
-
-#define WINDOW_WIDTH  500
-#define WINDOW_HEIGHT 500
 
 /* 
  * this software is currently in after process of inlining, which is 'opposite process to factoring'
@@ -140,109 +138,6 @@ typedef struct {
     int key;                            //
 } button_mapping;
 
-// TODO: setup this:
-  /* Event type 3 (EV_ABS) */
-  /*   Event code 0 (ABS_X) */
-  /*   Event code 1 (ABS_Y) */
-  /*   Event code 3 (ABS_RX) */
-  /*   Event code 4 (ABS_RY) */
-  /*     Min   -32768 */
-  /*     Max    32767 */
-  /*     Fuzz      16 */
-  /*     Flat     128 */
-
-  /*   Event code 2 (ABS_Z) */
-  /*   Event code 5 (ABS_RZ) */
-  /*     Min        0 */
-  /*     Max     1023 */
-
-  /*   Event code 16 (ABS_HAT0X) */
-  /*   Event code 17 (ABS_HAT0Y) */
-  /*     Min       -1 */
-  /*     Max        1 */
-// returns file descriptor or 0 on failure
-int setup_uinput() {
-    int gamepad_fd = open("/dev/uinput", O_RDWR | O_NONBLOCK);
-
-    struct uinput_user_dev uidev;
-    memset(&uidev, 0, sizeof(uidev));
-    strncpy(uidev.name, "Microsoft Xbox Series S|X Controller", UINPUT_MAX_NAME_SIZE-1); // -1 to guarantee 0 termination
-    uidev.id.bustype = BUS_USB;
-    uidev.id.vendor = 0x045e;
-    uidev.id.product = 0x0b12;
-    uidev.id.version = 0x0507;
-
-    ioctl(gamepad_fd, UI_SET_EVBIT, EV_KEY);
-    ioctl(gamepad_fd, UI_SET_KEYBIT, KEY_RECORD);
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_SOUTH );
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_EAST  );
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_NORTH );
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_WEST  );
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_TL    );
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_TR    );
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_SELECT);
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_START );
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_MODE  );
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_THUMBL);
-    ioctl(gamepad_fd, UI_SET_KEYBIT, BTN_THUMBR);
-
-    ioctl(gamepad_fd, UI_SET_EVBIT, EV_ABS);
-
-    static int abs[] = { ABS_X, ABS_Y, ABS_RX, ABS_RY };
-    for (int i = 0; i < 4; i++) {
-        ioctl(gamepad_fd, UI_SET_ABSBIT, abs[i]);
-        uidev.absmin[abs[i]] = -32768;
-        uidev.absmax[abs[i]] = 32767;
-        uidev.absfuzz[abs[i]] = 16;
-        uidev.absflat[abs[i]] = 128;
-    }
-
-    ioctl(gamepad_fd, UI_SET_ABSBIT, ABS_Z);
-    ioctl(gamepad_fd, UI_SET_ABSBIT, ABS_RZ);
-    ioctl(gamepad_fd, UI_SET_ABSBIT, ABS_HAT0X);
-    ioctl(gamepad_fd, UI_SET_ABSBIT, ABS_HAT0Y);
-
-    #ifdef RUMBLE
-    ioctl(gamepad_fd, UI_SET_EVBIT, EV_FF);
-    ioctl(gamepad_fd, UI_SET_FFBIT, FF_PERIODIC);
-    ioctl(gamepad_fd, UI_SET_FFBIT, FF_RUMBLE);
-    ioctl(gamepad_fd, UI_SET_FFBIT, FF_GAIN);
-    ioctl(gamepad_fd, UI_SET_FFBIT, FF_SQUARE);
-    ioctl(gamepad_fd, UI_SET_FFBIT, FF_TRIANGLE);
-    ioctl(gamepad_fd, UI_SET_FFBIT, FF_SINE);
-    uidev.ff_effects_max = 1;
-    #endif
-
-    ssize_t res = write(gamepad_fd, &uidev, sizeof(uidev));
-    if (res < 0)
-      perror("uinput device setup write");
-    if (ioctl(gamepad_fd, UI_DEV_CREATE) < 0)
-      perror("uinput device creation");
-
-    return gamepad_fd;
-}
-
-void gamepad_emit(int fd, int type, int code, int val) {
-   struct input_event ie;
-
-   ie.type = type;
-   ie.code = code;
-   ie.value = val;
-   /* timestamp values below are ignored */
-   ie.time.tv_sec = 0;
-   ie.time.tv_usec = 0;
-
-   write(fd, &ie, sizeof(ie));
-}
-
-void file_skip_character(FILE* file, char skipped) {
-    char c;
-    while ((c = getc(file)) == skipped)
-        if (c == EOF) return;
-
-    ungetc(c, file);
-}
-
 // == evdev.c ==
 static int is_event_device(const struct dirent *dir)
 {
@@ -323,6 +218,15 @@ int map_button(int new_key_code, button_mapping* mapping_array, int size, int ma
     strncat(mapping->display_name, keyboard_key_names[new_key_code], BUFSIZE);
 
     return previous_mapping_index;
+}
+
+
+void file_skip_character(FILE* file, char skipped) {
+    char c;
+    while ((c = getc(file)) == skipped)
+        if (c == EOF) return;
+
+    ungetc(c, file);
 }
 
 
@@ -501,15 +405,7 @@ int main() {
         }
     }
 
-    int gamepad_fd;
-    {  // setup_uinput()
-        gamepad_fd = setup_uinput();
-        if (!gamepad_fd) {
-            fprintf(stderr, "ERROR: could not setup uinput device\n");  // how to print error from setup_uinput here?
-            exit(1);
-        }
-    }
-
+    int gamepad_fd = uinput_setup();
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "ERROR: Could not initialize SDL: %s\n", SDL_GetError());
         return 0;
@@ -783,11 +679,11 @@ int main() {
 
                         if (ev.code == REL_X) {
                             x += ev.value;
-                            if (x < 0) x = 0; else if (x > SCREEN_WIDTH-1) x = SCREEN_WIDTH-1;
+                            if (x < 0) x = 0; else if (x > WINDOW_WIDTH-1) x = WINDOW_WIDTH-1;
                         }
                         if (ev.code == REL_Y) {
                             y += ev.value;
-                            if (y < 0) y = 0; else if (y > SCREEN_HEIGHT-1) y = SCREEN_HEIGHT-1;
+                            if (y < 0) y = 0; else if (y > WINDOW_HEIGHT-1) y = WINDOW_HEIGHT-1;
                         }
 
                     }
@@ -858,7 +754,7 @@ int main() {
                     {
                         nk_layout_row_push(ctx, 20);
                         nk_checkbox_label(ctx, "", &draw_left_analog);
-                        nk_layout_row_push(ctx, 180);
+                        nk_layout_row_push(ctx, SIDEBAR-20);
                         if (nk_button_label(ctx, mapping_array[0].display_name)) {
                             gui_config_mapping_opened = 1;
                             mapped_index = 0;
@@ -870,7 +766,7 @@ int main() {
                     {
                         nk_layout_row_push(ctx, 20);
                         nk_checkbox_label(ctx, "", &draw_right_analog);
-                        nk_layout_row_push(ctx, 180);
+                        nk_layout_row_push(ctx, SIDEBAR-20);
                         if (nk_button_label(ctx, mapping_array[1].display_name)) {
                             gui_config_mapping_opened = 1;
                             mapped_index = 1;
@@ -918,8 +814,7 @@ int main() {
         }
     }
 
-    ioctl(gamepad_fd, UI_DEV_DESTROY);
-    close(gamepad_fd);
+    uinput_close(gamepad_fd);
 
     if (gui_config_window_opened)
         nk_sdl_shutdown();
