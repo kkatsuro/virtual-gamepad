@@ -1,3 +1,9 @@
+wanted to make this repo private, but turns out one person added it to their stars
+
+THANKS @vitacell, the GOAT! 
+I hope this terrible shitty code has some elements which will could turn out to be useful example for someone
+
+
 # virtual-gamepad
 Linux input devices to Virtual Gamepad mapping software - https://youtu.be/tFwNMpu-GAw
 
